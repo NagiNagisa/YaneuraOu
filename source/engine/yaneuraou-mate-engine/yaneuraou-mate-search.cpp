@@ -242,16 +242,7 @@ namespace {
 	// 自作のエンジンのentry point
 	void engine_main()
 	{
-		// ここで作ったエンジン
-		auto engine = std::make_unique<Search::YaneuraOuMateEngine>();
-
-		// USIコマンドの応答部
-		auto usi = std::make_unique<USIEngine>();
-		usi->set_engine(*engine);  // エンジン実装を差し替える。
-		usi->enqueue_startup_commands(CommandLine::g);
-
-		// USIコマンドの応答のためのループ
-		usi->loop();
+		run_usi_engine(std::make_unique<Search::YaneuraOuMateEngine>());
 	}
 
 	// このentry pointを登録しておく。

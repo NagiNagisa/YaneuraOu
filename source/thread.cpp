@@ -32,8 +32,6 @@ Thread::Thread(Search::SharedState& sharedState,
     //nthreads(sharedState.options["Threads"]),
     stdThread(&Thread::idle_loop, this) {
 
-#if !defined(__EMSCRIPTEN__)
-
 #if STOCKFISH
 	run_custom_job([this, &binder, &sharedState /*, &sm*/, n]() {
 #else
@@ -60,19 +58,18 @@ Thread::Thread(Search::SharedState& sharedState,
     // スレッドはsearching == trueで開始するので、このままworkerのほう待機状態にさせておく
     wait_for_search_finished();
 
-#else
-    // yaneuraou.wasm
-    // wait_for_search_finished すると、ブラウザのメインスレッドをブロックしデッドロックが発生するため、コメントアウト。
-    //
-    // 新しいスレッドが cv を設定するのを待ってから、ブラウザに処理をパスしたいが、
-    // 新しいスレッド用のworkerを作成するためには、いったんブラウザに処理をパスする必要がある。
-    //
-    // https://bugzilla.mozilla.org/show_bug.cgi?id=1049079
-    //
-    // threadStarted という変数を設けて全てのスレッドが開始するまでリトライするようにする
-    //
-    // 参考：https://github.com/lichess-org/stockfish.wasm/blob/a022fa1405458d1bc1ba22fe813bace961859102/src/thread.cpp#L38
-#endif
+    /*
+        yaneuraou.wasm での注意
+
+        上のrun_custom_job()とwait_for_search_finished()は、生成したthreadが
+        idle_loop()に到達するまで呼び出し元をブロックする。
+        wasmでは新しいpthreadは事前に生成されたWorker pool(PTHREAD_POOL_SIZE)上で
+        動き始めるので、このブロックは解ける。ただしThreadsがPTHREAD_POOL_SIZEを
+        超えるとpool外のWorker生成が必要になり、それにはJS側のevent loopに制御を
+        返さねばならないので、メインスレッドで待っていると詰まる。
+        ブラウザでは、エンジンはメインスレッドではなくWorker内で動かすこと。
+        (node.jsではAtomics.waitが使えるので問題ない)
+    */
 }
 
 // Destructor wakes up the thread in idle_loop() and waits

@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <iosfwd>
 #include <map>
+#include <memory>
 #include <string>
 
 #include "types.h"
@@ -38,6 +39,26 @@ public:
 	// main threadをUSIメッセージの受信のために待機させる。
 	// "quit"コマンドが送られてくるまでこのループは抜けない。
 	void loop();
+
+#if defined(__EMSCRIPTEN__)
+	/*
+		yaneuraou.wasm
+
+		ブラウザのメインスレッドをブロックできないため、loop()ではループせず、
+		JS側から1コマンドずつ送ってもらう。
+
+		loop()が呼び出された時点で、この USIEngine 自身を wasm_instance に登録し、
+		C interfaceである usi_command() が、それを経由してこの下の
+		wasm_cmdexec() を呼び出す。
+		(usi_command()は、wasm_pre.js の Module["postMessage"] から呼び出される)
+	*/
+
+	// USIコマンドを1行実行する。
+	void wasm_cmdexec(const std::string& cmd);
+
+	// loop()の時点で登録される、現在のUSI応答部。
+	static USIEngine* wasm_instance;
+#endif
 
 	// --------------------
 	// USI関係の記法変換部
@@ -240,6 +261,16 @@ private:
 
 #endif
 };
+
+/*
+	単一のエンジンをUSIで起動する。
+
+	各エンジンのentry point(EngineFuncRegisterで登録する関数)から、
+	そのエンジンを生成して渡す。engineの所有権はこの関数に移る。
+
+	使用例) run_usi_engine(std::make_unique<YaneuraOuEngine>());
+*/
+void run_usi_engine(std::unique_ptr<IEngine> engine);
 
 } // namespace YaneuraOu
 

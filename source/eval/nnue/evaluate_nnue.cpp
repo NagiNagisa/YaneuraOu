@@ -61,6 +61,10 @@ void add_options(OptionsMap& options, ThreadPool& threads) {
 // 評価関数を読み込み済みであるか
 bool        eval_loaded   = false;
 std::string last_eval_dir = "None";
+#if defined(__EMSCRIPTEN__)
+// yaneuraou.wasm 前回のOptions["EvalFile"]
+std::string last_eval_file = "None";
+#endif
 
 // 📌 この評価関数で追加したいエンジンオプションはここで追加する。
 void add_options_(OptionsMap& options, ThreadPool& threads) {
@@ -81,6 +85,26 @@ void add_options_(OptionsMap& options, ThreadPool& threads) {
                     }
                     return std::nullopt;
                 }));
+
+#if defined(__EMSCRIPTEN__)
+    /*
+		yaneuraou.wasm
+
+		wasmでは、評価関数ファイルをJS側からMEMFS上に書き出して読み込ませる。
+		そのファイル名を指定できるように"EvalFile"オプションを追加する。
+		(load_eval()が、wasmの時に限り Options["EvalFile"] を参照している)
+	*/
+    Options.add("EvalFile", Option(EvalFileDefaultName, [](const Option& o) {
+                    std::string eval_file = std::string(o);
+                    if (last_eval_file != eval_file)
+                    {
+                        // 評価関数ファイル名の変更に際して、読み込みフラグをクリアする。
+                        last_eval_file = eval_file;
+                        eval_loaded    = false;
+                    }
+                    return std::nullopt;
+                }));
+#endif
 
     // NNUEのFV_SCALEの値
     Options.add("FV_SCALE", Option(16, 1, 128, [&](const Option& o) {

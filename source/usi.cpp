@@ -162,8 +162,11 @@ void USIEngine::loop()
 	engine.wait_for_search_finished();
 
 #else
-	// yaneuraOu.wasm
+	// yaneuraou.wasm
 	// ここでループしてしまうと、ブラウザのメインスレッドがブロックされてしまう。
+	// そこで、ここでは自分自身を登録するだけにして、すぐにreturnする。
+	// このあとは、JS側から usi_command() 経由で1コマンドずつ送られてくる。
+	wasm_instance = this;
 #endif
 }
 
@@ -1450,6 +1453,38 @@ void USIEngine::enqueue_startup_commands(const CommandLine& cli) {
     enqueue_startup_file_commands("startup.txt");
 }
 
+// 単一のエンジンをUSIで起動する。
+// 各エンジンのentry pointから呼び出す。engineの所有権はこの関数に移る。
+void run_usi_engine(std::unique_ptr<IEngine> engine) {
+
+    // USIコマンドの応答部
+    auto usi = std::make_unique<USIEngine>();
+
+    usi->set_engine(*engine);  // エンジン実装を差し替える。
+    usi->enqueue_startup_commands(CommandLine::g);
+
+    // USIコマンドの応答のためのループ
+    usi->loop();
+
+#if defined(__EMSCRIPTEN__)
+    // yaneuraou.wasm
+    //
+    // wasmでは、ブラウザのメインスレッドをブロックできないため、上のloop()は
+    // ループせずに即座にreturnしてくる。
+    // このあともJS側から usi_command() 経由でUSIコマンドが送られてくるので、
+    // ここでengineとUSI応答部を解体してはならない。所有権を手放して生かしておく。
+    usi.release();
+    engine.release();
+#endif
+
+    /*
+        注意 : usiはengineを所有せず参照するだけなので、engineより先に
+        解体されなければならない。
+        ローカル変数のusiは、値渡しの引数であるengineより先に破棄されるので、
+        この順序は言語規則で保証されている。
+    */
+}
+
 // ファイルからUSIコマンドをstd_inputに積む。
 void USIEngine::enqueue_command_from_file(std::istringstream& is) {
     std::string filename = "";
@@ -1800,30 +1835,38 @@ std::string USIEngine::value(Value v)
 
 
 
+#endif
+
+
 #if defined(__EMSCRIPTEN__)
 // --------------------
 // EMSCRIPTEN support
 // --------------------
-static StateListPtr states(new StateList(1));
+
+// loop()の時点で登録される、現在のUSI応答部。
+USIEngine* USIEngine::wasm_instance = nullptr;
+
+// USIコマンドを1行実行する。
+void USIEngine::wasm_cmdexec(const std::string& cmd) { usi_cmdexec(cmd); }
 
 // USI応答部 emscriptenインターフェース
-EMSCRIPTEN_KEEPALIVE extern "C" int usi_command(const char *c_cmd) {
-	std::string cmd(c_cmd);
+// wasm_pre.js の Module["postMessage"] から ccall("usi_command") で呼び出される。
+// 返し値 : 0 = 実行した , 1 = まだ実行できないので、あとで再送してほしい。
+//
+// 注意 : ThreadPool::set()(isreadyで呼ばれる)は、生成したthreadが起動するまで
+// 呼び出し元をブロックする。node.jsではAtomics.waitが使えるので問題ないが、
+// ブラウザではメインスレッドではなくWorker内でエンジンを動かすこと。
+EMSCRIPTEN_KEEPALIVE extern "C" int usi_command(const char* c_cmd) {
 
-	static Position pos;
-	string token;
+	auto* usi = USIEngine::wasm_instance;
 
-	for (Thread* th : Threads) {
-		if (!th->threadStarted)
-			return 1;
-	}
+	// loop()がまだ呼び出されていない。
+	if (usi == nullptr)
+		return 1;
 
-	usi_cmdexec(pos, states, cmd);
-
+	usi->wasm_cmdexec(std::string(c_cmd));
 	return 0;
 }
-#endif
-
 #endif
 
 } // namespace YaneuraOu
