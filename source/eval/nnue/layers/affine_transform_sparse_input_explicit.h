@@ -292,19 +292,6 @@ public:
 
         // Forward propagation
         void Propagate(const InputType* input, OutputType* output) const {
-#if defined(USE_WASM_SIMD)
-                {
-                        constexpr int n = kInputDimensions;
-                        constexpr int m = kOutputDimensions;
-                        constexpr int n_stride = kPaddedInputDimensions;
-                        auto A = *reinterpret_cast<const int8_t(*)[m][n_stride]>(weights_);
-                        auto x = *reinterpret_cast<const uint8_t(*)[n]>(input);
-                        auto b = *reinterpret_cast<const int32_t(*)[m]>(biases_);
-                        auto y = *reinterpret_cast<int32_t(*)[m]>(output);
-                        emscripten_wasm_simd::affine<n, m, n_stride>(A, x, b, y);
-                        return; // void return
-                }
-#endif
 
 #if defined(USE_SSSE3) || USE_NEON >= 8
 
