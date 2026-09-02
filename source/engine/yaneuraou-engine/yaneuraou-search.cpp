@@ -900,9 +900,10 @@ void Search::YaneuraOuWorker::pre_start_searching() {
 
     // 📝 StockfishではThreadPool::start_thinking()で行っているが、
     //     やねうら王では、派生classのpre_start_thinking()以降で行う。
-#if STOCKFISH
+    // 注意 : nmpMinPlyはWorkerのコンストラクタでは初期化されないので、
+    //        ここで必ず0にしておく必要がある。(探索中に停止した場合も、
+    //        null move pruningの検証中の値が残ったままになる)
     nmpMinPly       = 0;
-#endif
     bestMoveChanges = 0;
     rootDepth = completedDepth = 0;
 
