@@ -17,6 +17,10 @@
     #include <arm_neon.h>
 #endif
 
+#if defined(USE_WASM_RELAXED_SIMD)
+    #include <wasm_simd128.h>
+#endif
+
 // CPU capability switch for NNUE dot-product code. For SFNN H1=7 networks
 // (fc0: ->8, packed tail: 14->64->1), measured AVX512VNNI was slower than
 // AVX512 maddubs/madd, so only that NNUE shape uses the fallback.
@@ -85,9 +89,29 @@ namespace Simd
 }
 
 [[maybe_unused]] static void m128_add_dpbusd_epi32(__m128i& acc, __m128i a, __m128i b) {
+#if defined(USE_WASM_RELAXED_SIMD)
+    /*
+		yaneuraou.wasm
+
+		relaxed SIMDの i32x4.relaxed_dot_i8x16_i7x16_add_s は、VNNIのvpdpbusdに
+		相当する命令で、下のmaddubs + madd + add の3命令を1命令で行える。
+		(wasmには_mm_maddubs_epi16に相当する命令がないので、emscriptenのSSE
+		 エミュレーションでは、これはさらに複数命令に展開されている)
+
+		この命令は、第1引数がsigned int8、第2引数がunsignedの7bit(0..127)で
+		なければならない。(第2引数の最上位bitが立っているとき、その結果は
+		実装依存となる)
+		NNUEでは、a = ClippedReLUの出力(0..127) , b = 重み(int8)なので、
+		引数を入れ替えて (b , a) の順で渡す。
+
+		cf. https://github.com/WebAssembly/relaxed-simd/blob/main/proposals/relaxed-simd/Overview.md
+	*/
+    acc = (__m128i) wasm_i32x4_relaxed_dot_i8x16_i7x16_add((v128_t) b, (v128_t) a, (v128_t) acc);
+#else
     __m128i product0 = _mm_maddubs_epi16(a, b);
     product0         = _mm_madd_epi16(product0, _mm_set1_epi16(1));
     acc              = _mm_add_epi32(acc, product0);
+#endif
 }
 
 #endif

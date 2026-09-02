@@ -160,6 +160,12 @@ MATERIAL_LEVEL = 1
 EVAL_EMBEDDING = OFF
 # EVAL_EMBEDDING = ON
 
+# wasm(em++)でのビルド時に、relaxed SIMDを用いてNNUEを高速化する。
+# relaxed SIMD非対応の実行環境では動作しないので、ONにした成果物は
+# 通常版と一緒に配布して、実行環境に応じて出し分けること。
+WASM_RELAXED_SIMD = OFF
+# WASM_RELAXED_SIMD = ON
+
 # === implementations ===
 
 # 以下では、
@@ -231,8 +237,22 @@ else
 		CPPFLAGS += -Wno-unused-parameter
 		CPPFLAGS += -DUSE_WASM_SIMD -msimd128
 		CPPFLAGS += -DUSE_SSE42 -msse4.2
+
+		# relaxed SIMDを用いる。(WASM_RELAXED_SIMD=ON を指定した時)
+		# i32x4.relaxed_dot_i8x16_i7x16_add_s (VNNIのvpdpbusd相当)がNNUEで効く。
+		# ただし、relaxed SIMDに対応していない実行環境では動作しないので、
+		# feature detectionを行って、対応/非対応の2種類を出し分ける必要がある。
+		# cf. https://github.com/GoogleChromeLabs/wasm-feature-detect
+		ifeq ($(WASM_RELAXED_SIMD),ON)
+			CPPFLAGS += -DUSE_WASM_RELAXED_SIMD -mrelaxed-simd
+		endif
+
 		CPPFLAGS += -pthread
 		CPPFLAGS += -s STRICT=1
+		# -mrelaxed-simd を付けると、LLVMがfloat演算をrelaxed_madd(FMA)に融合しうる。
+		# 結果が実行環境のCPUに依存すると、時間管理などのdouble計算が環境ごとに
+		# ずれるので、FMAへの縮約を禁止して決定性を保つ。(整数のNNUE演算には無関係)
+		CPPFLAGS += -ffp-contract=off
 		LDFLAGS += --pre-js wasm_pre.js
 		# LDFLAGS += --preload-file eval/nn.bin
 		LDFLAGS += -s MODULARIZE=1 -s EXPORT_NAME="$(EM_EXPORT_NAME)" -s ENVIRONMENT=web,worker,node
