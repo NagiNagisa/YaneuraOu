@@ -256,6 +256,16 @@ else
 		LDFLAGS += --pre-js wasm_pre.js
 		# LDFLAGS += --preload-file eval/nn.bin
 		LDFLAGS += -s MODULARIZE=1 -s EXPORT_NAME="$(EM_EXPORT_NAME)" -s ENVIRONMENT=web,worker,node
+		# -s STRICT=1 は INCOMING_MODULE_JS_API=[] を含意するので、JS側(wasm_pre.jsや
+		# 読み込み側)から Module に渡すものはここに列挙しないと黙って無視される。
+		#   print / printErr : wasm_pre.js が標準出力を横取りしてlistenerに配る
+		#   postRun          : wasm_pre.js がコマンドのpollingを開始する
+		#   wasmBinary       : 読み込み側が .wasm のバイト列を直接渡す
+		#   noExitRuntime    : これが無いと、pthread有効時は EXIT_RUNTIME=0 でも main()から
+		#                      戻った時点でruntimeが終了扱いになり(keepRuntimeAlive()が
+		#                      カウンタのみの判定に落ちる)、worker poolが破棄され、以降
+		#                      探索threadからの出力がmainに届かなくなる。
+		LDFLAGS += -s INCOMING_MODULE_JS_API=print,printErr,postRun,wasmBinary,noExitRuntime
 		LDFLAGS += -s PTHREAD_POOL_SIZE=32
 		# -s PTHREAD_POOL_SIZE_STRICT=32
 		LDFLAGS += -s FILESYSTEM=1 -s EXIT_RUNTIME=0 -s "EXPORTED_RUNTIME_METHODS=['FS','ccall']"

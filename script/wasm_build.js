@@ -353,12 +353,15 @@ export = ${pkgobj.exportname};
     const bpath = fpath.join(cwd, builddirlib, bfile);
     const bpath_br = fpath.join(cwd, builddirlib, bfile_br);
     const bpath_gz = fpath.join(cwd, builddirlib, bfile_gz);
-    const ws_br = fs.createWriteStream(bpath_br);
-    const ws_gz = fs.createWriteStream(bpath_gz);
     if(!fs.existsSync(bpath)) {
+      // 新しいemscriptenでは pthread の worker スクリプトが本体の .js に埋め込まれ、
+      // 別ファイルの .worker.js は生成されない。無ければ飛ばす。
+      if (fext === "worker.js") continue;
       console.error(`file not found: ${bpath}`);
       process.exit(1);
     }
+    const ws_br = fs.createWriteStream(bpath_br);
+    const ws_gz = fs.createWriteStream(bpath_gz);
     for(const copy_dir of lib_copy_dirs) {
       fs.copyFileSync(bpath, fpath.join(cwd, copy_dir, bfile));
     }
