@@ -12,6 +12,7 @@ const pkgobjs = [
     edition: "YANEURAOU_ENGINE_NNUE",
     exportname: "YaneuraOu_HalfKP",
     extra: "ENGINE_NAME=Suisho5+YaneuraOu EVAL_EMBEDDING=ON EM_INITIAL_MEMORY_SIZE=167772160 EXTRA_CPPFLAGS='-DENGINE_OPTIONS=\\\"\"option=name=FV_SCALE=type=spin=default=24=min=1=max=128\\\"\"'",
+    nnue: true,
     evalfile: true,
   },
   {
@@ -19,6 +20,7 @@ const pkgobjs = [
     edition: "YANEURAOU_ENGINE_NNUE_KP256",
     exportname: "YaneuraOu_K_P",
     extra: "EVAL_EMBEDDING=ON EM_INITIAL_MEMORY_SIZE=92274688 EXTRA_CPPFLAGS='-DENGINE_OPTIONS=\\\"\"option=name=FV_SCALE=type=spin=default=24=min=1=max=128\\\"\"'",
+    nnue: true,
     evalfile: true,
   },
   {
@@ -26,6 +28,7 @@ const pkgobjs = [
     edition: "YANEURAOU_ENGINE_NNUE",
     exportname: "YaneuraOu_HalfKP_noeval",
     extra: "EM_INITIAL_MEMORY_SIZE=167772160",
+    nnue: true,
     evalfile: true,
   },
   {
@@ -33,6 +36,7 @@ const pkgobjs = [
     edition: "YANEURAOU_ENGINE_NNUE_HALFKPE9",
     exportname: "YaneuraOu_HalfKPE9_noeval",
     extra: "EM_INITIAL_MEMORY_SIZE=167772160",
+    nnue: true,
     evalfile: true,
   },
   {
@@ -40,6 +44,7 @@ const pkgobjs = [
     edition: "YANEURAOU_ENGINE_NNUE_HALFKP_VM_256X2_32_32",
     exportname: "YaneuraOu_HalfKPvm_noeval",
     extra: "EM_INITIAL_MEMORY_SIZE=167772160",
+    nnue: true,
     evalfile: true,
   },
   {
@@ -47,6 +52,7 @@ const pkgobjs = [
     edition: "YANEURAOU_ENGINE_NNUE_KP256",
     exportname: "YaneuraOu_K_P_noeval",
     extra: "EM_INITIAL_MEMORY_SIZE=92274688",
+    nnue: true,
     evalfile: true,
   },
   {
@@ -54,6 +60,7 @@ const pkgobjs = [
     edition: "YANEURAOU_ENGINE_MATERIAL",
     exportname: "YaneuraOu_Material",
     extra: "MATERIAL_LEVEL=1 EM_INITIAL_MEMORY_SIZE=92274688",
+    nnue: false,
     evalfile: false,
   },
   {
@@ -61,6 +68,7 @@ const pkgobjs = [
     edition: "YANEURAOU_ENGINE_MATERIAL",
     exportname: "YaneuraOu_Material9",
     extra: "MATERIAL_LEVEL=9 EM_INITIAL_MEMORY_SIZE=402653184",
+    nnue: false,
     evalfile: false,
   },
   {
@@ -68,6 +76,7 @@ const pkgobjs = [
     edition: "YANEURAOU_MATE_ENGINE",
     exportname: "YaneuraOu_MATE",
     extra: "EM_INITIAL_MEMORY_SIZE=92274688",
+    nnue: false,
     evalfile: false,
   },
   {
@@ -75,12 +84,26 @@ const pkgobjs = [
     edition: "TANUKI_MATE_ENGINE",
     exportname: "tanuki_MATE",
     extra: "EM_INITIAL_MEMORY_SIZE=92274688",
+    nnue: false,
     evalfile: false,
   },
 ];
 
-const args = process.argv.slice(2);
+const args = process.argv.slice(2).filter((e) => !e.startsWith("--"));
 const pkglist = args.length ? pkgobjs.filter((e) => (args.indexOf(e.name) >= 0)) : pkgobjs;
+
+/*
+  relaxed SIMD版も一緒にビルドするか。(--relaxed または WASM_RELAXED_SIMD=ON)
+
+     relaxed SIMDが効くのはNNUEのaffine層(Simd::m128_add_dpbusd_epi32)だけなので、
+     NNUE系のedition(nnue: true)のみ、yaneuraou.<name>.relaxed.wasm を追加で出力する。
+     material系や詰将棋エンジンでは意味がないので出力しない。
+
+     注意 : relaxed SIMD非対応の実行環境にrelaxed SIMD版を渡すと、instantiateの
+     時点でCompileErrorになる。(実行時に遅い経路へfallbackする仕組みはWebAssembly
+     には存在しない) このため、必ず両方を配布して、実行環境に応じて出し分けること。
+*/
+const buildRelaxed = process.argv.includes("--relaxed") || process.env.WASM_RELAXED_SIMD === "ON";
 
 if(!fs.existsSync("source/Makefile")) {
   console.error("source folder not found");
@@ -132,7 +155,26 @@ const process = require("process");
 const fs = require("fs");
 const path = require("path");
 const readline = require("readline");
-const YaneuraOu = require("./lib/yaneuraou.${pkgobj.name}");
+
+/*
+  relaxed SIMD版がビルドされていて、かつ実行環境がそれに対応していればそちらを使う。
+
+  [注意] relaxed SIMD非対応の環境にrelaxed SIMD版を渡すと、instantiateの時点で
+    CompileErrorになる。(実行時に遅い経路へfallbackする仕組みはWebAssemblyにはない)
+    ブラウザから使う場合も、fetchする前に wasm-feature-detect の relaxedSimd() などで
+    判定して、読み込む .wasm を切り替えること。
+*/
+function selectBuild() {
+  const base = path.join(__dirname, "./lib/yaneuraou.${pkgobj.name}");
+  const relaxedWasm = base + ".relaxed.wasm";
+  if (fs.existsSync(relaxedWasm)) {
+    const wasmBinary = fs.readFileSync(relaxedWasm);
+    if (WebAssembly.validate(wasmBinary)) {
+      return { factory: require(base + ".relaxed.js"), wasmBinary };
+    }
+  }
+  return { factory: require(base + ".js"), wasmBinary: fs.readFileSync(base + ".wasm") };
+}
 
 const USI_BOOK_FILE = process.env.USI_BOOK_FILE;
 const USI_EVAL_FILE = process.env.USI_EVAL_FILE;
@@ -149,21 +191,24 @@ async function runRepl(yaneuraou) {
 }
 
 async function main(argv) {
-  const wasmBinary = await fs.promises.readFile(path.join(__dirname, "./lib/yaneuraou.${pkgobj.name}.wasm"));
-  const yaneuraou = await YaneuraOu({ wasmBinary });
+  const { factory, wasmBinary } = selectBuild();
+  const yaneuraou = await factory({ wasmBinary });
   const FS = yaneuraou.FS;
   if (USI_BOOK_FILE) {
     const buffer = await fs.promises.readFile(USI_BOOK_FILE);
     FS.writeFile(\`/\${path.basename(USI_BOOK_FILE)}\`, buffer);
-    yaneuraou.postMessage("setoption name BookDir value .");
+    yaneuraou.postMessage("setoption name BookDir value /");
     yaneuraou.postMessage(\`setoption name BookFile value \${path.basename(USI_BOOK_FILE)}\`);
   }
+  // ファイルはMEMFSのルート(/)に置く。
+  // EvalDir/BookDirには絶対パスの"/"を渡す。"."だとエンジン側が実行ファイルの
+  // 場所(node.jsではスクリプトの絶対パス)を基準に解決してしまい、MEMFSのファイルに届かない。
   const USE_EVAL_FILE = ${pkgobj.evalfile};
   if (USE_EVAL_FILE && USI_EVAL_FILE) {
     const buffer = await fs.promises.readFile(USI_EVAL_FILE);
     const filebase = path.basename(USI_EVAL_FILE);
     FS.writeFile(\`/\${filebase}\`, buffer);
-    yaneuraou.postMessage("setoption name EvalDir value .");
+    yaneuraou.postMessage("setoption name EvalDir value /");
     yaneuraou.postMessage(\`setoption name EvalFile value \${filebase}\`);
   }
   if (argv.length > 0) {
@@ -186,8 +231,20 @@ import process from "process";
 import fs from "fs";
 import path from "path";
 import readline from "readline";
-import YaneuraOu = require("./lib/yaneuraou.${pkgobj.name}");
 import { YaneuraOuModule } from "./lib/yaneuraou.module";
+
+// relaxed SIMD版がビルドされていて、かつ実行環境がそれに対応していればそちらを使う。
+function selectBuild(): { factory: EmscriptenModuleFactory<YaneuraOuModule>, wasmBinary: Buffer } {
+  const base = path.join(__dirname, "./lib/yaneuraou.${pkgobj.name}");
+  const relaxedWasm = base + ".relaxed.wasm";
+  if (fs.existsSync(relaxedWasm)) {
+    const wasmBinary = fs.readFileSync(relaxedWasm);
+    if (WebAssembly.validate(wasmBinary)) {
+      return { factory: require(base + ".relaxed.js"), wasmBinary };
+    }
+  }
+  return { factory: require(base + ".js"), wasmBinary: fs.readFileSync(base + ".wasm") };
+}
 
 const USI_BOOK_FILE = process.env.USI_BOOK_FILE;
 const USI_EVAL_FILE = process.env.USI_EVAL_FILE;
@@ -204,21 +261,24 @@ async function runRepl(yaneuraou: YaneuraOuModule) {
 }
 
 async function main(argv: string[]) {
-  const wasmBinary = await fs.promises.readFile(path.join(__dirname, "./lib/yaneuraou.${pkgobj.name}.wasm"));
-  const yaneuraou: YaneuraOuModule = await YaneuraOu({ wasmBinary });
+  const { factory, wasmBinary } = selectBuild();
+  const yaneuraou: YaneuraOuModule = await factory({ wasmBinary });
   const FS = yaneuraou.FS;
   if (USI_BOOK_FILE) {
     const buffer = await fs.promises.readFile(USI_BOOK_FILE);
     FS.writeFile(\`/\${path.basename(USI_BOOK_FILE)}\`, buffer);
-    yaneuraou.postMessage("setoption name BookDir value .");
+    yaneuraou.postMessage("setoption name BookDir value /");
     yaneuraou.postMessage(\`setoption name BookFile value \${path.basename(USI_BOOK_FILE)}\`);
   }
+  // ファイルはMEMFSのルート(/)に置く。
+  // EvalDir/BookDirには絶対パスの"/"を渡す。"."だとエンジン側が実行ファイルの
+  // 場所(node.jsではスクリプトの絶対パス)を基準に解決してしまい、MEMFSのファイルに届かない。
   const USE_EVAL_FILE = ${pkgobj.evalfile};
   if (USE_EVAL_FILE && USI_EVAL_FILE) {
     const buffer = await fs.promises.readFile(USI_EVAL_FILE);
     const filebase = path.basename(USI_EVAL_FILE);
     FS.writeFile(\`/\${filebase}\`, buffer);
-    yaneuraou.postMessage("setoption name EvalDir value .");
+    yaneuraou.postMessage("setoption name EvalDir value /");
     yaneuraou.postMessage(\`setoption name EvalFile value \${filebase}\`);
   }
   if (argv.length > 0) {
@@ -261,25 +321,35 @@ import { YaneuraOuModule } from "./yaneuraou.module";
 declare const ${pkgobj.exportname}: EmscriptenModuleFactory<YaneuraOuModule>;
 export = ${pkgobj.exportname};
 `);
+  if (buildRelaxed && pkgobj.nnue) {
+    fs.copyFileSync(bpath_dts, fpath.join(cwd, builddirlib, `yaneuraou.${pkgobj.name}.relaxed.d.ts`));
+  }
   for(const copy_dir of dts_copy_dirs) {
     fs.copyFileSync(bpath_module_dts, fpath.join(cwd, copy_dir, `yaneuraou.module.d.ts`));
     fs.copyFileSync(bpath_dts, fpath.join(cwd, copy_dir, `yaneuraou.${pkgobj.name}.d.ts`));
   }
   // make
-  await new Promise((resolve) => {
-    let child = exec(
-      `make -j${cpus} clean tournament COMPILER=em++ TARGET_CPU=WASM YANEURAOU_EDITION=${pkgobj.edition} TARGET=../${builddirlib}yaneuraou.${pkgobj.name}.js EM_EXPORT_NAME=${pkgobj.exportname} ${pkgobj.extra}`,
-      { cwd: fpath.join(cwd, "source"), stdio: "inherit" },
-      (_error, _stdout, _stderr) => { resolve(); },
-    );
-    child.stdout.on('data', (data) => { console.log(String(data).trimEnd()); });
-    child.stderr.on('data', (data) => { console.error(String(data).trimEnd()); });
-  });
+  // 通常版と、(指定があってNNUE系editionなら)relaxed SIMD版をビルドする。
+  const variants = [{ suffix: "", make: "" }];
+  if (buildRelaxed && pkgobj.nnue) variants.push({ suffix: ".relaxed", make: "WASM_RELAXED_SIMD=ON" });
+
+  for (const variant of variants) {
+    await new Promise((resolve) => {
+      let child = exec(
+        `make -j${cpus} clean tournament COMPILER=em++ TARGET_CPU=WASM YANEURAOU_EDITION=${pkgobj.edition} TARGET=../${builddirlib}yaneuraou.${pkgobj.name}${variant.suffix}.js EM_EXPORT_NAME=${pkgobj.exportname} ${pkgobj.extra} ${variant.make}`,
+        { cwd: fpath.join(cwd, "source"), stdio: "inherit" },
+        (_error, _stdout, _stderr) => { resolve(); },
+      );
+      child.stdout.on('data', (data) => { console.log(String(data).trimEnd()); });
+      child.stderr.on('data', (data) => { console.error(String(data).trimEnd()); });
+    });
+  }
   // compress, public copy
+  for (const variant of variants)
   for (const fext of ["js", "worker.js", "wasm"]) {
-    const bfile = `yaneuraou.${pkgobj.name}.${fext}`;
-    const bfile_br = `yaneuraou.${pkgobj.name}.${fext}.br`;
-    const bfile_gz = `yaneuraou.${pkgobj.name}.${fext}.gz`;
+    const bfile = `yaneuraou.${pkgobj.name}${variant.suffix}.${fext}`;
+    const bfile_br = `yaneuraou.${pkgobj.name}${variant.suffix}.${fext}.br`;
+    const bfile_gz = `yaneuraou.${pkgobj.name}${variant.suffix}.${fext}.gz`;
     const bpath = fpath.join(cwd, builddirlib, bfile);
     const bpath_br = fpath.join(cwd, builddirlib, bfile_br);
     const bpath_gz = fpath.join(cwd, builddirlib, bfile_gz);
